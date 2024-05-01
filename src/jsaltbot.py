@@ -51,17 +51,23 @@ def create_query_handler(query_engine):
     query_engine instance and returns the event handler
     """
     
-    def query_event_handler(say, body):
-        # print("Query received")
+    def query_event_handler(event, say):
         try:
-            user_query = body["event"]["blocks"][0]["elements"][0]["elements"][1]["text"]
+            channel_id = event['channel']
+            thread_ts = event['ts']
+            full_user_query = event['text']
+
+            # strip out the bot name mention from the query
+            user_query = re.sub(r"<@[^>]+>", "", full_user_query).strip()
+
+            # user_query = body["event"]["blocks"][0]["elements"][0]["elements"][1]["text"]
             if user_query:
                 print(f"Query received: {user_query}\n")
                 response = query_engine.custom_query(user_query)
                 print(f"Response: {response}\n")
 
                 # this part goes to Slack
-                say(response)
+                say(response, channel=channel_id, thread_ts=thread_ts)
         except Exception as e:
             print("Error: %s"%e)
 
