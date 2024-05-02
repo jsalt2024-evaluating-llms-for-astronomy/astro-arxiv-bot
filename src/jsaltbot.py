@@ -2,10 +2,12 @@ import chromadb
 import json
 import os
 import re
+import torch
 
 from pathlib import Path
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
+from transformers import AutoTokenizer
 from typing import List
 
 from llama_index.core import Document, PromptTemplate, SimpleDirectoryReader, Settings, StorageContext, VectorStoreIndex, get_response_synthesizer
@@ -14,37 +16,67 @@ from llama_index.core.response_synthesizers import BaseSynthesizer
 from llama_index.core.retrievers import BaseRetriever
 from llama_index.core.schema import TextNode
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from llama_index.llms.huggingface import HuggingFaceLLM
 from llama_index.llms.openai import OpenAI
 from llama_index.readers.json import JSONReader
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
 ROOT = Path(__file__).parents[1].resolve()
 
+hf_token = os.environ["HF_TOKEN"]
+
+# Slack bot app
+app = App(token=os.environ["SLACK_BOT_TOKEN"])
+
+# EMBEDDING MODEL
 # sentence transformers -- lightweight embedding model for now; astrollama too big
 embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
-llm = OpenAI(model="gpt-4-vision-preview")
+
+# LLM FOR GENERATION
+# llm = OpenAI(model="gpt-4-vision-preview")
+model_name = "meta-llama/Meta-Llama-3-8B-Instruct"
+tokenizer = AutoTokenizer.from_pretrained(model_name, token=hf_token)
+
+stopping_ids = [
+    tokenizer.eos_token_id,
+    tokenizer.convert_tokens_to_ids("<|eot_id|>"),
+]
+
+llm = HuggingFaceLLM(
+    model_name=model_name,
+    model_kwargs={
+        "token": hf_token,
+        "torch_dtype": torch.bfloat16,
+    },
+    generate_kwargs={
+        "do_sample": True,
+        "temperature": 0.01,
+        "top_p": 0.9, # doesn't matter much with such low temperature
+    },
+    tokenizer_name="meta-llama/Meta-Llama-3-8B-Instruct",
+    tokenizer_kwargs={"token": hf_token},
+    stopping_ids=stopping_ids,
+)
 
 Settings.chunk_size = 1024
 Settings.embed_model = embed_model
 Settings.llm = llm
 
 qa_prompt = PromptTemplate(
-    "Paper chunks are below:\n"
+    "You are an astronomy research assistant that can access arXiv/astro-ph papers as context "
+    "to answer user queries."
+    "Given the arXiv paper chunks, answer the query like a professional research astronomer. "
+    "ALWAYS cite referenced papers if they support your answer (e.g., 2204.03315); "
+    "otherwise don't reference the arXiv paper chunks or references within them. "
+    "Prioritize more recent results. Answer in about 50-100 words. " # really should say 100 words for GPT-4, 50 words for Llama-3 because it is so verbose
+    "If you don't know the answer then say 'I cannot answer.'\n" 
+    "arXiv paper chunks are below:\n"
     "---------------------\n"
     "{context_str}\n"
     "---------------------\n"
-    "Given the arXiv paper chunks, answer the query like a professional research astronomer. "
-    "Only cite referenced papers if they support your answer; otherwise don't reference the "
-    "arXiv paper chunks at all. Always cite using the arXiv identifier of the supporting paper " 
-    "(YYMM.XXXXX) and don't use references from within the text chunks. If you find multiple "
-    "papers that are relevant but have differing opinions, then use the most recent results. "
-    "If you don't know the answer then say 'I cannot answer.' Answer in 100 words or less.\n"
     "Query: {query_str}\n"
     "Answer: "
 )
-
-# Slack bot stuff...
-app = App(token=os.environ["SLACK_BOT_TOKEN"])
 
 def create_query_handler(query_engine):
     """Factory method that handles the Slack bot while loading the appropriate
@@ -134,7 +166,7 @@ class ArxivRetrievalQueryEngine(CustomQueryEngine):
 
         return str(response)
 
-def build_query_engine(index, k_retrieve=3, response_mode="refine") -> ArxivRetrievalQueryEngine:
+def build_query_engine(index, k_retrieve=5, response_mode="refine") -> ArxivRetrievalQueryEngine:
     """convenience function that returns the query engine defined in the 
     above class. 
 
@@ -187,7 +219,7 @@ if __name__ == "__main__":
         )
 
     # build query engine (using global vars for llm and qa_prompt... see top!)
-    query_engine = build_query_engine(index, k_retrieve=3, response_mode="refine")
+    query_engine = build_query_engine(index, k_retrieve=5, response_mode="refine")
     
     # initialize the Slack listener function
     handler = create_query_handler(query_engine)
