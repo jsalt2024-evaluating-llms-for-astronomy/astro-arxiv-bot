@@ -22,8 +22,11 @@ from llama_index.readers.json import JSONReader
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
 ROOT = Path(__file__).parents[1].resolve()
-
 hf_token = os.environ["HF_TOKEN"]
+
+USE_OPENAI = True
+
+TOP_K_PAPERS = 3
 
 # Slack bot app
 app = App(token=os.environ["SLACK_BOT_TOKEN"])
@@ -33,30 +36,32 @@ app = App(token=os.environ["SLACK_BOT_TOKEN"])
 embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
 
 # LLM FOR GENERATION
-# llm = OpenAI(model="gpt-4-vision-preview")
-model_name = "meta-llama/Meta-Llama-3-8B-Instruct"
-tokenizer = AutoTokenizer.from_pretrained(model_name, token=hf_token)
+if USE_OPENAI:
+    llm = OpenAI(model="gpt-4-vision-preview")
+else:
+    model_name = "meta-llama/Meta-Llama-3-8B-Instruct"
+    tokenizer = AutoTokenizer.from_pretrained(model_name, token=hf_token)
 
-stopping_ids = [
-    tokenizer.eos_token_id,
-    tokenizer.convert_tokens_to_ids("<|eot_id|>"),
-]
+    stopping_ids = [
+        tokenizer.eos_token_id,
+        tokenizer.convert_tokens_to_ids("<|eot_id|>"),
+    ]
 
-llm = HuggingFaceLLM(
-    model_name=model_name,
-    model_kwargs={
-        "token": hf_token,
-        "torch_dtype": torch.bfloat16,
-    },
-    generate_kwargs={
-        "do_sample": True,
-        "temperature": 0.01,
-        "top_p": 0.9, # doesn't matter much with such low temperature
-    },
-    tokenizer_name="meta-llama/Meta-Llama-3-8B-Instruct",
-    tokenizer_kwargs={"token": hf_token},
-    stopping_ids=stopping_ids,
-)
+    llm = HuggingFaceLLM(
+        model_name=model_name,
+        model_kwargs={
+            "token": hf_token,
+            "torch_dtype": torch.bfloat16,
+        },
+        generate_kwargs={
+            "do_sample": True,
+            "temperature": 0.1,
+            "top_p": 0.95
+        },
+        tokenizer_name="meta-llama/Meta-Llama-3-8B-Instruct",
+        tokenizer_kwargs={"token": hf_token},
+        stopping_ids=stopping_ids,
+    )
 
 Settings.chunk_size = 1024
 Settings.embed_model = embed_model
@@ -65,12 +70,12 @@ Settings.llm = llm
 qa_prompt = PromptTemplate(
     "You are an astronomy research assistant that can access arXiv/astro-ph papers as context "
     "to answer user queries."
-    "Given the arXiv paper chunks, answer the query like a professional research astronomer. "
-    "ALWAYS cite referenced papers if they support your answer (e.g., 2204.03315); "
-    "otherwise don't reference the arXiv paper chunks or references within them. "
-    "Prioritize more recent results. Answer in about 50-100 words. " # really should say 100 words for GPT-4, 50 words for Llama-3 because it is so verbose
+    "Given the arXiv papers, answer the query like a professional research astronomer. "
+    "ALWAYS cite referenced papers if they support your answer; "
+    "otherwise don't reference the arXiv papers or references within them. "
+    "Prioritize more recent results. Answer in 100 words or fewer. " # really should say 100 words for GPT-4, 50 words for Llama-3 because it is so verbose
     "If you don't know the answer then say 'I cannot answer.'\n" 
-    "arXiv paper chunks are below:\n"
+    "arXiv papers are below:\n"
     "---------------------\n"
     "{context_str}\n"
     "---------------------\n"
@@ -140,7 +145,7 @@ def format_node_data(node: TextNode) -> str:
         conc = doc[doc_id]["conclusions"]
 
     formatted_context = (
-        f"{doc_id}\n\n"
+        f"arXiv ID: {doc_id}\n\n"
         f"(Year: {'19' + yymm[:2] if int(yymm[:4]) > 9000 else '20'+yymm[:2]})\n\n"
         f"ABSTRACT: {abs}\n\n"
         f"CONCLUSIONS: {conc}"
@@ -166,19 +171,19 @@ class ArxivRetrievalQueryEngine(CustomQueryEngine):
 
         return str(response)
 
-def build_query_engine(index, k_retrieve=5, response_mode="refine") -> ArxivRetrievalQueryEngine:
+def build_query_engine(index, top_k_papers=5, response_mode="refine") -> ArxivRetrievalQueryEngine:
     """convenience function that returns the query engine defined in the 
     above class. 
 
     Params
-    k_retrieve: int
+    top_k_papers: int
         number of astro-ph documents to retrieve
     response_mode: str -- must be "refine" or "compact"
         how should the LLM integrate the context?
 
     `llm` and `qa_prompt` are global vars
     """
-    retriever = index.as_retriever(similarity_top_k=k_retrieve)
+    retriever = index.as_retriever(similarity_top_k=top_k_papers)
     synthesizer = get_response_synthesizer(llm=llm, text_qa_template=qa_prompt, response_mode=response_mode)
     
     query_engine = ArxivRetrievalQueryEngine(
@@ -219,7 +224,7 @@ if __name__ == "__main__":
         )
 
     # build query engine (using global vars for llm and qa_prompt... see top!)
-    query_engine = build_query_engine(index, k_retrieve=5, response_mode="refine")
+    query_engine = build_query_engine(index, top_k_papers=TOP_K_PAPERS, response_mode="refine")
     
     # initialize the Slack listener function
     handler = create_query_handler(query_engine)
