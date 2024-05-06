@@ -1,3 +1,4 @@
+import argparse 
 import chromadb
 import json
 import os
@@ -10,7 +11,7 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from transformers import AutoTokenizer
 from typing import List
 
-from llama_index.core import Document, PromptTemplate, SimpleDirectoryReader, Settings, StorageContext, VectorStoreIndex, get_response_synthesizer
+from llama_index.core import Document, PromptTemplate, StorageContext, VectorStoreIndex, get_response_synthesizer
 from llama_index.core.query_engine import CustomQueryEngine
 from llama_index.core.response_synthesizers import BaseSynthesizer
 from llama_index.core.retrievers import BaseRetriever
@@ -18,54 +19,55 @@ from llama_index.core.schema import TextNode
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.llms.huggingface import HuggingFaceLLM
 from llama_index.llms.openai import OpenAI
-from llama_index.readers.json import JSONReader
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
 ROOT = Path(__file__).parents[1].resolve()
 hf_token = os.environ["HF_TOKEN"]
-
-USE_OPENAI = False
-
-TOP_K_PAPERS = 3
-
-# Slack bot app
 app = App(token=os.environ["SLACK_BOT_TOKEN"])
 
-# EMBEDDING MODEL
-# sentence transformers -- lightweight embedding model for now; astrollama too big
-embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
 
-# LLM FOR GENERATION
-if USE_OPENAI:
-    llm = OpenAI(model="gpt-4-vision-preview")
-else:
-    model_name = "meta-llama/Meta-Llama-3-8B-Instruct"
-    tokenizer = AutoTokenizer.from_pretrained(model_name, token=hf_token)
+def parse_arguments():
+    parser = argparse.ArgumentParser(description='Running the LLM RAG-powered Slack bot, AstroArXivBot.')
 
-    stopping_ids = [
-        tokenizer.eos_token_id,
-        tokenizer.convert_tokens_to_ids("<|eot_id|>"),
-    ]
+    parser.add_argument("-l", "--local-llm", type=bool, help="Use LLaMA-3-8B-Instruct (local LLM) instead of OpenAI", default=True)
+    parser.add_argument("-k", "--top-k-papers", type=int, help="Number of top papers to retrieve", default=3)
 
-    llm = HuggingFaceLLM(
-        model_name=model_name,
-        model_kwargs={
-            "token": hf_token,
-            "torch_dtype": torch.bfloat16,
-        },
-        generate_kwargs={
-            "do_sample": True,
-            "temperature": 0.1,
-            "top_p": 0.95
-        },
-        tokenizer_name="meta-llama/Meta-Llama-3-8B-Instruct",
-        tokenizer_kwargs={"token": hf_token},
-        stopping_ids=stopping_ids,
-    )
+    args = parser.parse_args()
+    return args
 
-Settings.chunk_size = 1024
-Settings.embed_model = embed_model
-Settings.llm = llm
+def initialize_models(local_llm=True):
+
+    embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
+
+    if local_llm:
+        model_name = "meta-llama/Meta-Llama-3-8B-Instruct"
+        tokenizer = AutoTokenizer.from_pretrained(model_name, token=hf_token)
+
+        stopping_ids = [
+            tokenizer.eos_token_id,
+            tokenizer.convert_tokens_to_ids("<|eot_id|>"),
+        ]
+
+        llm = HuggingFaceLLM(
+            model_name=model_name,
+            model_kwargs={
+                "token": hf_token,
+                "torch_dtype": torch.bfloat16,
+            },
+            generate_kwargs={
+                "do_sample": True,
+                "temperature": 0.1,
+                "top_p": 0.95
+            },
+            tokenizer_name="meta-llama/Meta-Llama-3-8B-Instruct",
+            tokenizer_kwargs={"token": hf_token},
+            stopping_ids=stopping_ids,
+        )
+    else:
+        llm = OpenAI(model="gpt-4-vision-preview")
+
+    return embed_model, llm
+
 
 qa_prompt = PromptTemplate(
     "You are an astronomy research assistant that can access arXiv/astro-ph papers as context "
@@ -171,7 +173,7 @@ class ArxivRetrievalQueryEngine(CustomQueryEngine):
 
         return str(response)
 
-def build_query_engine(index, llm=llm, top_k_papers=5, response_mode="refine") -> ArxivRetrievalQueryEngine:
+def build_query_engine(index, llm, top_k_papers=5, response_mode="refine") -> ArxivRetrievalQueryEngine:
     """convenience function that returns the query engine defined in the 
     above class. 
 
@@ -196,6 +198,9 @@ def build_query_engine(index, llm=llm, top_k_papers=5, response_mode="refine") -
     return query_engine
 
 if __name__ == "__main__":
+
+    args = parse_arguments()
+    embed_model, llm = initialize_models(local_llm=args.local_llm)
 
     print(f"Working in {ROOT} directory")
     db = chromadb.PersistentClient(path=f"{ROOT}/chroma_db")
@@ -224,11 +229,12 @@ if __name__ == "__main__":
         )
 
     # build query engine (using global vars for llm and qa_prompt... see top!)
-    query_engine = build_query_engine(index, llm=llm, top_k_papers=TOP_K_PAPERS, response_mode="refine")
+    query_engine = build_query_engine(index, llm=llm, top_k_papers=args.top_k_papers, response_mode="refine")
     
-    # initialize the Slack listener function
+    # initialize the Slack listener function for @mentions and direct messages
     handler = create_query_handler(query_engine)
-    app.event("app_mention")(handler)
+    app.event("app_mention")(handler) 
+    app.event("message")(handler) 
 
     # start Slack app
     SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"]).start()
