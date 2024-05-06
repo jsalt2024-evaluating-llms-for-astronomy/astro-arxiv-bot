@@ -24,7 +24,7 @@ from llama_index.vector_stores.chroma import ChromaVectorStore
 ROOT = Path(__file__).parents[1].resolve()
 hf_token = os.environ["HF_TOKEN"]
 
-USE_OPENAI = True
+USE_OPENAI = False
 
 TOP_K_PAPERS = 3
 
@@ -74,8 +74,8 @@ qa_prompt = PromptTemplate(
     "ALWAYS cite referenced papers if they support your answer; "
     "otherwise don't reference the arXiv papers or references within them. "
     "Prioritize more recent results. Answer in 100 words or fewer. " # really should say 100 words for GPT-4, 50 words for Llama-3 because it is so verbose
-    "If you don't know the answer then say 'I cannot answer.'\n" 
-    "arXiv papers are below:\n"
+    "If you don't know the answer based on the papers then say 'I cannot answer.'\n" 
+    "arXiv astro-ph papers are below:\n"
     "---------------------\n"
     "{context_str}\n"
     "---------------------\n"
@@ -171,7 +171,7 @@ class ArxivRetrievalQueryEngine(CustomQueryEngine):
 
         return str(response)
 
-def build_query_engine(index, top_k_papers=5, response_mode="refine") -> ArxivRetrievalQueryEngine:
+def build_query_engine(index, llm=llm, top_k_papers=5, response_mode="refine") -> ArxivRetrievalQueryEngine:
     """convenience function that returns the query engine defined in the 
     above class. 
 
@@ -224,7 +224,7 @@ if __name__ == "__main__":
         )
 
     # build query engine (using global vars for llm and qa_prompt... see top!)
-    query_engine = build_query_engine(index, top_k_papers=TOP_K_PAPERS, response_mode="refine")
+    query_engine = build_query_engine(index, llm=llm, top_k_papers=TOP_K_PAPERS, response_mode="refine")
     
     # initialize the Slack listener function
     handler = create_query_handler(query_engine)
