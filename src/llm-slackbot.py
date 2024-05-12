@@ -121,7 +121,7 @@ def create_query_handler(query_engine):
     query_engine instance and returns the event handler
     """
 
-    def query_event_handler(event, say):
+    def query_event_handler(event, say, client):
         try:
             channel_id = event["channel"]
             thread_ts = event["ts"]
@@ -140,12 +140,25 @@ def create_query_handler(query_engine):
                 print(f"Response: {response}\n")
 
                 # this part goes to Slack!
-                say(
+                reply = say(
                     response,
                     channel=channel_id,
                     thread_ts=thread_ts,
                     unfurl_links=False,
                 )
+
+                # also send two emoji responses
+                client.reactions_add(
+                    channel=channel_id,
+                    timestamp=reply["ts"],  # use the timestamp of the reply
+                    name="thumbsup",
+                )
+                client.reactions_add(
+                    channel=channel_id,
+                    timestamp=reply["ts"],  # use the timestamp of the reply
+                    name="thumbsdown",
+                )
+
         except Exception as e:
             print("Error: %s" % e)
 
