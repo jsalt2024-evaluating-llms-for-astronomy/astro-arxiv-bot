@@ -1,10 +1,12 @@
 import argparse
 import chromadb
 import json
+import logging
 import os
 import re
 import torch
 
+from datetime import datetime
 from pathlib import Path
 from pydantic import BaseModel, Field, conlist
 from slack_bolt import App
@@ -33,6 +35,7 @@ from llama_index.vector_stores.chroma import ChromaVectorStore
 ROOT = Path(__file__).parents[1].resolve()
 hf_token = os.environ["HF_TOKEN"]
 app = App(token=os.environ["SLACK_BOT_TOKEN"])
+logger = logging.getLogger(__name__)
 
 
 def parse_arguments():
@@ -53,6 +56,15 @@ def parse_arguments():
         default=3,
     )
 
+    parser.add_argument(
+        "-v",
+        "--verbosity",
+        type=str,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Set the logging verbosity level (default: INFO)",
+    )
+
     args = parser.parse_args()
     return args
 
@@ -64,7 +76,7 @@ def initialize_models(local_llm=True):
 
     if local_llm:
         model_name = "meta-llama/Meta-Llama-3-8B-Instruct"
-        print(f"Using LOCAL MODEL: {model_name}")
+        logging.info(f"Using LOCAL MODEL: {model_name}")
 
         tokenizer = AutoTokenizer.from_pretrained(model_name, token=hf_token)
 
@@ -90,10 +102,20 @@ def initialize_models(local_llm=True):
         Settings.llm = llm
         Settings.tokenizer = tokenizer
     else:
-        gpt_model_name = "gpt-4-vision-preview"
+        gpt_model_name = "gpt-4o"
         llm = OpenAI(model=gpt_model_name, temperature=0.0)
-        print(f"Using GPT model: {gpt_model_name}")
+        logging.info(f"Using GPT model: {gpt_model_name}")
         Settings.llm = llm
+
+
+def setup_logging(verbosity, log_filename):
+
+    log_level = getattr(logging, verbosity.upper(), logging.INFO)
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[logging.FileHandler(log_filename), logging.StreamHandler()],
+    )
 
 
 qa_prompt = PromptTemplate(
@@ -134,10 +156,10 @@ def create_query_handler(query_engine):
             if user_query:
 
                 # for logging purposes
-                print(f"Query received: {user_query}\n")
+                logging.info(f"Query received: {user_query}\n")
 
                 response = query_engine.custom_query(user_query)
-                print(f"Response: {response}\n")
+                logging.info(f"Response: {response}\n")
 
                 # this part goes to Slack!
                 reply = say(
@@ -147,20 +169,20 @@ def create_query_handler(query_engine):
                     unfurl_links=False,
                 )
 
-                # also send two emoji responses
+                # pre-populate reply with two emoji responses
                 client.reactions_add(
                     channel=channel_id,
-                    timestamp=reply["ts"],  # use the timestamp of the reply
+                    timestamp=reply["ts"],
                     name="thumbsup",
                 )
                 client.reactions_add(
                     channel=channel_id,
-                    timestamp=reply["ts"],  # use the timestamp of the reply
+                    timestamp=reply["ts"],
                     name="thumbsdown",
                 )
 
         except Exception as e:
-            print("Error: %s" % e)
+            logging.error("Error: %s" % e)
 
     return query_event_handler
 
@@ -224,7 +246,7 @@ def model_validate_arxiv_paper(formatted_context: str, max_retry=5) -> ArXivPape
             return validated_output(formatted_context=formatted_context)
         except Exception as e:
             retries += 1
-            print(f"Retry #{retries}", e)
+            logging.warning(f"Retry #{retries}", e)
     return None
 
 
@@ -254,10 +276,10 @@ def format_node_data(node: TextNode, improved_validation=True) -> str:
         f"CITATION: '<{make_arxiv_link(arxiv_id)}|{arxiv_id}>'\n\n"
         f"YEAR: {'19' + yymm[:2] if int(yymm[:4]) > 9000 else '20' + yymm[:2]}\n\n"
         f"ABSTRACT: {abstract}\n\n"
-        # f"CONCLUSIONS: {conclusions}\n"
+        f"CONCLUSIONS: {conclusions}\n"
     )
 
-    # DON'T USE FOR NOW -- FAILS TOO OFTEN WITH LOCAL MODELS
+    # CURRENTLY NOT RELIABLE ENOUGH TO USE
     if improved_validation:
         output = model_validate_arxiv_paper(formatted_context)
 
@@ -332,9 +354,14 @@ def build_query_engine(
 if __name__ == "__main__":
 
     args = parse_arguments()
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_filename = f"{ROOT}/logs/log_{timestamp}.log"
+    setup_logging(args.verbosity, log_filename)
+
     initialize_models(local_llm=args.local_llm)
 
-    print(f"Working in {ROOT} directory")
+    logging.info(f"Working in {ROOT} directory")
     db = chromadb.PersistentClient(path=f"{ROOT}/chroma_db")
     chroma_collection = db.get_or_create_collection("astroph-abs_bge-small-en")
     vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
@@ -346,7 +373,7 @@ if __name__ == "__main__":
         docs_path = f"{ROOT}/arxiv-astro-ph"
         arxiv_docs = process_json_data(docs_path)
 
-        print(f"Building vector store for {len(arxiv_docs)} documents...")
+        logging.info(f"Building vector store for {len(arxiv_docs)} documents...")
 
         # for building vector store
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
@@ -357,7 +384,7 @@ if __name__ == "__main__":
         )
     # otherwise, build index
     else:
-        print(f"Loading {n_docs} documents...")
+        logging.info(f"Loading {n_docs} documents...")
         index = VectorStoreIndex.from_vector_store(
             vector_store, embed_model=Settings.embed_model
         )
