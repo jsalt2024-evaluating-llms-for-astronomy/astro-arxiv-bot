@@ -1,2 +1,2 @@
-# astro-arxiv-bot
-an question-answering bot powered by retrieval-augmented generation
+# AstroArXivBot
+A question-answering bot powered by retrieval-augmented generation (RAG).
