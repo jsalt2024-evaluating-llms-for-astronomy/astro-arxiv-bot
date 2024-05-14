@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "astro-arxiv-bot"
+version = "0.1.0"
+description = "A question-answering bot powered by retrieval-augmented generation"
+requires-python = ">=3.8"
+readme = "README.md"
+license = {file="LICENSE"}
+authors = [
+    {name = "John F. Wu", email = "jwuphysics@gmail.com"},
+    {name = "JSALT 2024 - Evaluating LLMs for Astronomy team"}
+]
+maintainers = [
+  {name = "John F. Wu", email = "jwuphysics@gmail.com"}
+]
+classifiers = [
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Development Status :: 4 - Beta",
+]
+
+[project.optional-dependencies]
+dev = ["black"]
