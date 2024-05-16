@@ -138,53 +138,71 @@ qa_prompt = PromptTemplate(
 )
 
 
-def create_query_handler(query_engine):
-    """Factory method that handles the Slack bot while loading the appropriate
-    query_engine instance and returns the event handler
-    """
+@app.event("app_mention")
+@app.event("message")
+def handle_query_event(event, say, client):
+    try:
+        event_type = event["type"]
+        channel_id = event["channel"]
+        thread_ts = event["ts"]
+        full_user_query = event["text"]
 
-    def query_event_handler(event, say, client):
-        try:
-            channel_id = event["channel"]
-            thread_ts = event["ts"]
-            full_user_query = event["text"]
+        # strip out the bot name mention from the query
+        user_query = re.sub(r"<@[^>]+>", "", full_user_query).strip()
 
-            # strip out the bot name mention from the query
-            user_query = re.sub(r"<@[^>]+>", "", full_user_query).strip()
+        # user_query = body["event"]["blocks"][0]["elements"][0]["elements"][1]["text"]
+        if user_query:
 
-            # user_query = body["event"]["blocks"][0]["elements"][0]["elements"][1]["text"]
-            if user_query:
+            # for logging purposes
+            logging.info(
+                f"Query received. Channel: {channel_id}, Event type: {event_type}, Thread time stamp {thread_ts}\n{user_query}"
+            )
 
-                # for logging purposes
-                logging.info(f"Query received: {user_query}\n")
+            response = query_engine.custom_query(user_query)
 
-                response = query_engine.custom_query(user_query)
-                logging.info(f"Response: {response}\n")
+            # this part goes to Slack!
+            reply = say(
+                response,
+                channel=channel_id,
+                thread_ts=thread_ts,
+                unfurl_links=False,
+            )
 
-                # this part goes to Slack!
-                reply = say(
-                    response,
-                    channel=channel_id,
-                    thread_ts=thread_ts,
-                    unfurl_links=False,
-                )
+            # pre-populate reply with two emoji responses
+            client.reactions_add(
+                channel=channel_id,
+                timestamp=reply["ts"],
+                name="thumbsup",
+            )
+            client.reactions_add(
+                channel=channel_id,
+                timestamp=reply["ts"],
+                name="thumbsdown",
+            )
+            logging.info(f"Response ({reply['ts']})\n{response}\n")
 
-                # pre-populate reply with two emoji responses
-                client.reactions_add(
-                    channel=channel_id,
-                    timestamp=reply["ts"],
-                    name="thumbsup",
-                )
-                client.reactions_add(
-                    channel=channel_id,
-                    timestamp=reply["ts"],
-                    name="thumbsdown",
-                )
+    except Exception as e:
+        logging.error(f"Error: {e}")
 
-        except Exception as e:
-            logging.error("Error: %s" % e)
+    return handle_query_event
 
-    return query_event_handler
+
+@app.event("reaction_added")
+@app.event("reaction_removed")
+def handle_reaction_added(event, say):
+    try:
+        logging.debug(f"Received event: {event['type']}")
+
+        event_type = event["type"]
+        message_ts = event["item"]["ts"]
+        reaction = event["reaction"]
+        user = event["user"]
+
+        logging.info(
+            f"{event_type}: {reaction}, Message timestamp: {message_ts}, User: {user}"
+        )
+    except Exception as e:
+        logging.error(f"Error: {e}")
 
 
 def process_json_data(directory_path: str | os.PathLike) -> List[Document]:
@@ -393,11 +411,6 @@ if __name__ == "__main__":
     query_engine = build_query_engine(
         index, top_k_papers=args.top_k_papers, response_mode="compact"
     )
-
-    # initialize the Slack listener function for @mentions and direct messages
-    handler = create_query_handler(query_engine)
-    app.event("app_mention")(handler)
-    app.event("message")(handler)
 
     # start Slack app
     SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"]).start()
