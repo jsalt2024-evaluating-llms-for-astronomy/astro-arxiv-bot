@@ -145,17 +145,18 @@ def handle_query_event(event, say, client):
         event_type = event["type"]
         channel_id = event["channel"]
         thread_ts = event["ts"]
+        user = event["user"]
         full_user_query = event["text"]
 
         # strip out the bot name mention from the query
         user_query = re.sub(r"<@[^>]+>", "", full_user_query).strip()
 
-        # user_query = body["event"]["blocks"][0]["elements"][0]["elements"][1]["text"]
-        if user_query:
+        # the second part filters out replies in an existing thread
+        if user_query and "thread_ts" not in event:
 
             # for logging purposes
             logging.info(
-                f"Query received. Channel: {channel_id}, Event type: {event_type}, Thread time stamp {thread_ts}\n{user_query}"
+                f"Query received. User: {user}, Channel: {channel_id}, Event type: {event_type}, Thread time stamp {thread_ts}\n{user_query}"
             )
 
             response = query_engine.custom_query(user_query)
@@ -180,6 +181,16 @@ def handle_query_event(event, say, client):
                 name="thumbsdown",
             )
             logging.info(f"Response ({reply['ts']})\n{response}\n")
+        elif "thread_ts" in event:
+            # this catches user replies (but prevents LLM response)
+            user = event["user"]
+            text = event["text"]
+            thread_ts = event["thread_ts"]
+            message_ts = event["ts"]
+
+            logging.info(
+                f"Thread message from user: {user}, text: {text}, thread timestamp: {thread_ts}, message timestamp: {message_ts}"
+            )
 
     except Exception as e:
         logging.error(f"Error: {e}")
@@ -201,6 +212,23 @@ def handle_reaction_added(event, say):
         logging.info(
             f"{event_type}: {reaction}, Message timestamp: {message_ts}, User: {user}"
         )
+    except Exception as e:
+        logging.error(f"Error: {e}")
+
+
+@app.event("message")
+def handle_thread_messages(event, say):
+    try:
+        logging.info(f"{event}")
+        if "thread_ts" in event:
+            user = event["user"]
+            text = event["text"]
+            thread_ts = event["thread_ts"]
+            message_ts = event["ts"]
+
+            logging.info(
+                f"Thread message from user: {user}, text: {text}, thread timestamp: {thread_ts}, message timestamp: {message_ts}"
+            )
     except Exception as e:
         logging.error(f"Error: {e}")
 
