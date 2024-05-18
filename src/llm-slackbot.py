@@ -142,60 +142,91 @@ qa_prompt = PromptTemplate(
 @app.event("message")
 def handle_query_event(event, say, client):
     try:
+        logging.debug(f"Received event: {event}")
+
         event_type = event["type"]
         channel_id = event["channel"]
-        thread_ts = event["ts"]
+        ts = event["ts"]
+        thread_ts = (
+            event.get("thread_ts") or ts
+        )  # Use thread_ts if present, else fallback to ts
         user = event["user"]
         full_user_query = event["text"]
 
-        # strip out the bot name mention from the query
+        # Strip out the bot name mention from the query
         user_query = re.sub(r"<@[^>]+>", "", full_user_query).strip()
 
-        # the second part filters out replies in an existing thread
-        if user_query and "thread_ts" not in event:
-
-            # for logging purposes
+        # Check if this message is in a thread where the bot has already replied
+        if event.get("thread_ts") and event["thread_ts"] != event["ts"]:
+            # Log the message without replying
             logging.info(
-                f"Query received. User: {user}, Channel: {channel_id}, Event type: {event_type}, Thread time stamp {thread_ts}\n{user_query}"
+                f"Message in thread from user: {user}, text: {full_user_query}, thread timestamp: {thread_ts}"
             )
+        else:
+            # Handle direct messages
+            if event.get("channel_type") == "im":
+                if user_query:
+                    # Log the direct message
+                    logging.info(
+                        f"Direct message received. User: {user}, Channel: {channel_id}, Event type: {event_type}, Thread timestamp {thread_ts}\n{user_query}"
+                    )
 
-            response = query_engine.custom_query(user_query)
+                    response = query_engine.custom_query(user_query)
 
-            # this part goes to Slack!
-            reply = say(
-                response,
-                channel=channel_id,
-                thread_ts=thread_ts,
-                unfurl_links=False,
-            )
+                    # Send the response to Slack in the same thread
+                    reply = say(
+                        response,
+                        channel=channel_id,
+                        thread_ts=thread_ts,
+                        unfurl_links=False,
+                    )
 
-            # pre-populate reply with two emoji responses
-            client.reactions_add(
-                channel=channel_id,
-                timestamp=reply["ts"],
-                name="thumbsup",
-            )
-            client.reactions_add(
-                channel=channel_id,
-                timestamp=reply["ts"],
-                name="thumbsdown",
-            )
-            logging.info(f"Response ({reply['ts']})\n{response}\n")
-        elif "thread_ts" in event:
-            # this catches user replies (but prevents LLM response)
-            user = event["user"]
-            text = event["text"]
-            thread_ts = event["thread_ts"]
-            message_ts = event["ts"]
+                    # Pre-populate reply with two emoji reactions
+                    client.reactions_add(
+                        channel=channel_id,
+                        timestamp=reply["ts"],
+                        name="thumbsup",
+                    )
+                    client.reactions_add(
+                        channel=channel_id,
+                        timestamp=reply["ts"],
+                        name="thumbsdown",
+                    )
+                    logging.info(f"Response ({reply['ts']})\n{response}\n")
 
-            logging.info(
-                f"Thread message from user: {user}, text: {text}, thread timestamp: {thread_ts}, message timestamp: {message_ts}"
-            )
+            # Handle mentions in channels
+            elif event_type == "app_mention":
+                if user_query:
+                    # Log the mention
+                    logging.info(
+                        f"Mention received. User: {user}, Channel: {channel_id}, Event type: {event_type}, Thread timestamp {thread_ts}\n{user_query}"
+                    )
+
+                    response = query_engine.custom_query(user_query)
+
+                    # Send the response to Slack in the same thread
+                    reply = say(
+                        response,
+                        channel=channel_id,
+                        thread_ts=thread_ts,
+                        unfurl_links=False,
+                    )
+
+                    # Pre-populate reply with two emoji reactions
+                    client.reactions_add(
+                        channel=channel_id,
+                        timestamp=reply["ts"],
+                        name="thumbsup",
+                    )
+                    client.reactions_add(
+                        channel=channel_id,
+                        timestamp=reply["ts"],
+                        name="thumbsdown",
+                    )
+                    logging.info(f"Response ({reply['ts']})\n{response}\n")
 
     except Exception as e:
         logging.error(f"Error: {e}")
-
-    return handle_query_event
 
 
 @app.event("reaction_added")
@@ -212,23 +243,6 @@ def handle_reaction_added(event, say):
         logging.info(
             f"{event_type}: {reaction}, Message timestamp: {message_ts}, User: {user}"
         )
-    except Exception as e:
-        logging.error(f"Error: {e}")
-
-
-@app.event("message")
-def handle_thread_messages(event, say):
-    try:
-        logging.info(f"{event}")
-        if "thread_ts" in event:
-            user = event["user"]
-            text = event["text"]
-            thread_ts = event["thread_ts"]
-            message_ts = event["ts"]
-
-            logging.info(
-                f"Thread message from user: {user}, text: {text}, thread timestamp: {thread_ts}, message timestamp: {message_ts}"
-            )
     except Exception as e:
         logging.error(f"Error: {e}")
 
