@@ -121,14 +121,15 @@ def setup_logging(verbosity, log_filename):
 qa_prompt = PromptTemplate(
     "You are an astronomy research assistant that can access arXiv paper chunks as context "
     "to answer user queries."
-    "Given the context, answer the query like a professional research astronomer. "
+    "Some of the context may contain LaTeX code, but please answer "
+    "the query in natural language like a professional research astronomer. "
     "Match the level of specificity or generality as the query. "
     "ALWAYS cite ALL relevant papers using EXACTLY the citation style in the context, "
     "in parentheses: `(<https://arxiv.org/abs/1406.2364|1406.2364>)`."
     "The current year is 2024. Unless directed others, prioritize MORE RECENT results based on the paper YEAR. "
     "Answer in 100 words or fewer. "  # maybe more like 50 for Llama-3...
     "If the query is not related to astronomy in any way, or if none of the papers can help "
-    "you answer this, then say 'I cannot answer'. (But only do this sparingly.)\n\n"
+    "you answer this, then say 'I cannot answer'.\n\n"
     "The arXiv astro-ph papers context string are below:\n"
     "---------------------\n"
     "{context_str}\n"
@@ -153,27 +154,27 @@ def handle_query_event(event, say, client):
         user = event["user"]
         full_user_query = event["text"]
 
-        # Strip out the bot name mention from the query
+        # strip out the bot name mention from the query
         user_query = re.sub(r"<@[^>]+>", "", full_user_query).strip()
 
-        # Check if this message is in a thread where the bot has already replied
+        # check if this message is in a thread where the bot has already replied
         if event.get("thread_ts") and event["thread_ts"] != event["ts"]:
-            # Log the message without replying
+            # log the message without replying
             logging.info(
                 f"Message in thread from user: {user}, text: {full_user_query}, thread timestamp: {thread_ts}"
             )
         else:
-            # Handle direct messages
+            # handle direct messages
             if event.get("channel_type") == "im":
                 if user_query:
-                    # Log the direct message
+                    # log the direct message
                     logging.info(
                         f"Direct message received. User: {user}, Channel: {channel_id}, Event type: {event_type}, Thread timestamp {thread_ts}\n{user_query}"
                     )
 
                     response = query_engine.custom_query(user_query)
 
-                    # Send the response to Slack in the same thread
+                    # send the response to Slack in the same thread
                     reply = say(
                         response,
                         channel=channel_id,
@@ -181,7 +182,7 @@ def handle_query_event(event, say, client):
                         unfurl_links=False,
                     )
 
-                    # Pre-populate reply with two emoji reactions
+                    # pre-populate reply with two emoji reactions
                     client.reactions_add(
                         channel=channel_id,
                         timestamp=reply["ts"],
@@ -194,17 +195,15 @@ def handle_query_event(event, say, client):
                     )
                     logging.info(f"Response ({reply['ts']})\n{response}\n")
 
-            # Handle mentions in channels
+            # handle mentions in channels -- same as above
             elif event_type == "app_mention":
                 if user_query:
-                    # Log the mention
                     logging.info(
                         f"Mention received. User: {user}, Channel: {channel_id}, Event type: {event_type}, Thread timestamp {thread_ts}\n{user_query}"
                     )
 
                     response = query_engine.custom_query(user_query)
 
-                    # Send the response to Slack in the same thread
                     reply = say(
                         response,
                         channel=channel_id,
@@ -212,7 +211,6 @@ def handle_query_event(event, say, client):
                         unfurl_links=False,
                     )
 
-                    # Pre-populate reply with two emoji reactions
                     client.reactions_add(
                         channel=channel_id,
                         timestamp=reply["ts"],
