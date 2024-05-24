@@ -114,18 +114,23 @@ def initialize_tables():
     if not os.path.exists(f"{results_dir}/feedback.tsv"):
         with open(f"{results_dir}/feedback.tsv", "a") as f:
             f.write("thread_ts\tts\tuser\tfull_user_query\n")
-    
+
     if not os.path.exists(f"{results_dir}/qa_pairs.tsv"):
         with open(f"{results_dir}/qa_pairs.tsv", "a") as f:
-            f.write("thread_ts\tchannel_id\tevent_type\tuser\tfull_user_query\tresponse\tanswer_ts\n")
+            f.write(
+                "thread_ts\tchannel_id\tevent_type\tuser\tfull_user_query\tresponse\tanswer_ts\n"
+            )
 
     if not os.path.exists(f"{results_dir}/retrievals.tsv"):
         with open(f"{results_dir}/retrievals.tsv", "a") as f:
-            f.write("thread_ts\tretrieved_node_1\tretrieved_score_1\tretrieved_node_2\tretrieved_score_2\tretrieved_node_3\tretrieved_score_3\tretrieved_node_4\tretrieved_score_4\tretrieved_node_1\tretrieved_score_5\n")
+            f.write(
+                "thread_ts\tretrieved_node_1\tretrieved_score_1\tretrieved_node_2\tretrieved_score_2\tretrieved_node_3\tretrieved_score_3\tretrieved_node_4\tretrieved_score_4\tretrieved_node_1\tretrieved_score_5\n"
+            )
 
     if not os.path.exists(f"{results_dir}/reactions.tsv"):
         with open(f"{results_dir}/reactions.tsv", "a") as f:
             f.write("answer_ts\tevent_type\tuser\treaction\n")
+
 
 def setup_logging(verbosity, log_filename):
 
@@ -203,7 +208,7 @@ def handle_query_event(event, say, client):
                         unfurl_links=False,
                     )
 
-                    answer_ts = reply['ts']
+                    answer_ts = reply["ts"]
 
                     # pre-populate reply with two emoji reactions
                     client.reactions_add(
@@ -220,11 +225,18 @@ def handle_query_event(event, say, client):
 
                     # write out to CSV tables
                     with open(f"{results_dir}/qa_pairs.tsv", "a") as f:
-                        f.write(f"{thread_ts}\t{channel_id}\t{event_type}\t{user}\t{full_user_query}\t{response}\t{answer_ts}\n")
+                        f.write(
+                            f"{thread_ts}\t{channel_id}\t{event_type}\t{user}\t{full_user_query}\t{response}\t{answer_ts}\n"
+                        )
 
                     retrieval_data = (
                         f"{thread_ts}\t"
-                        + "\t".join([f"{nodes[0].metadata['doc_id']}\t{nodes[0].score}" for node in nodes])
+                        + "\t".join(
+                            [
+                                f"{nodes[0].metadata['doc_id']}\t{nodes[0].score}"
+                                for node in nodes
+                            ]
+                        )
                         + "\n"
                     )
                     with open(f"{results_dir}/retrievals.tsv", "a") as f:
@@ -246,7 +258,7 @@ def handle_query_event(event, say, client):
                         unfurl_links=False,
                     )
 
-                    answer_ts = reply['ts']
+                    answer_ts = reply["ts"]
 
                     client.reactions_add(
                         channel=channel_id,
@@ -262,11 +274,18 @@ def handle_query_event(event, say, client):
 
                     # write out to CSV tables
                     with open(f"{results_dir}/qa_pairs.tsv", "a") as f:
-                        f.write(f"{thread_ts}\t{channel_id}\t{event_type}\t{user}\t{full_user_query}\t{response}\t{answer_ts}\n")
+                        f.write(
+                            f"{thread_ts}\t{channel_id}\t{event_type}\t{user}\t{full_user_query}\t{response}\t{answer_ts}\n"
+                        )
 
                     retrieval_data = (
                         f"{thread_ts}\t"
-                        + "\t".join([f"{nodes[0].metadata['doc_id']}\t{nodes[0].score}" for node in nodes])
+                        + "\t".join(
+                            [
+                                f"{nodes[0].metadata['doc_id']}\t{nodes[0].score}"
+                                for node in nodes
+                            ]
+                        )
                         + "\n"
                     )
                     with open(f"{results_dir}/retrievals.tsv", "a") as f:
