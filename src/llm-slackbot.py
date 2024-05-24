@@ -33,6 +33,7 @@ from llama_index.llms.openai import OpenAI
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
 ROOT = Path(__file__).parents[1].resolve()
+results_dir = f"{ROOT}/results"
 hf_token = os.environ["HF_TOKEN"]
 app = App(token=os.environ["SLACK_BOT_TOKEN"])
 logger = logging.getLogger(__name__)
@@ -40,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
-        description="Running the LLM RAG-powered Slack bot, AstroArXivBot."
+        description="Running the LLM RAG-powered Slack bot, AstroPh-QA-Bot."
     )
 
     parser.add_argument(
@@ -108,6 +109,29 @@ def initialize_models(local_llm=True):
         Settings.llm = llm
 
 
+def initialize_tables():
+
+    if not os.path.exists(f"{results_dir}/feedback.tsv"):
+        with open(f"{results_dir}/feedback.tsv", "a") as f:
+            f.write("thread_ts\tts\tuser\tfull_user_query\n")
+
+    if not os.path.exists(f"{results_dir}/qa_pairs.tsv"):
+        with open(f"{results_dir}/qa_pairs.tsv", "a") as f:
+            f.write(
+                "thread_ts\tchannel_id\tevent_type\tuser\tfull_user_query\tresponse\tanswer_ts\n"
+            )
+
+    if not os.path.exists(f"{results_dir}/retrievals.tsv"):
+        with open(f"{results_dir}/retrievals.tsv", "a") as f:
+            f.write(
+                "thread_ts\tretrieved_node_1\tretrieved_score_1\tretrieved_node_2\tretrieved_score_2\tretrieved_node_3\tretrieved_score_3\tretrieved_node_4\tretrieved_score_4\tretrieved_node_1\tretrieved_score_5\n"
+            )
+
+    if not os.path.exists(f"{results_dir}/reactions.tsv"):
+        with open(f"{results_dir}/reactions.tsv", "a") as f:
+            f.write("answer_ts\tevent_type\tuser\treaction\n")
+
+
 def setup_logging(verbosity, log_filename):
 
     log_level = getattr(logging, verbosity.upper(), logging.INFO)
@@ -121,14 +145,15 @@ def setup_logging(verbosity, log_filename):
 qa_prompt = PromptTemplate(
     "You are an astronomy research assistant that can access arXiv paper chunks as context "
     "to answer user queries."
-    "Given the context, answer the query like a professional research astronomer. "
+    "Some of the context may contain LaTeX code, but please answer "
+    "the query in natural language like a professional research astronomer. "
     "Match the level of specificity or generality as the query. "
     "ALWAYS cite ALL relevant papers using EXACTLY the citation style in the context, "
     "in parentheses: `(<https://arxiv.org/abs/1406.2364|1406.2364>)`."
     "The current year is 2024. Unless directed others, prioritize MORE RECENT results based on the paper YEAR. "
     "Answer in 100 words or fewer. "  # maybe more like 50 for Llama-3...
     "If the query is not related to astronomy in any way, or if none of the papers can help "
-    "you answer this, then say 'I cannot answer'. (But only do this sparingly.)\n\n"
+    "you answer this, then say 'I cannot answer'.\n\n"
     "The arXiv astro-ph papers context string are below:\n"
     "---------------------\n"
     "{context_str}\n"
@@ -153,27 +178,29 @@ def handle_query_event(event, say, client):
         user = event["user"]
         full_user_query = event["text"]
 
-        # Strip out the bot name mention from the query
+        # strip out the bot name mention from the query
         user_query = re.sub(r"<@[^>]+>", "", full_user_query).strip()
 
-        # Check if this message is in a thread where the bot has already replied
+        # check if this message is in a thread where the bot has already replied
         if event.get("thread_ts") and event["thread_ts"] != event["ts"]:
-            # Log the message without replying
+            # log the message without replying
             logging.info(
-                f"Message in thread from user: {user}, text: {full_user_query}, thread timestamp: {thread_ts}"
+                f"Message in thread (feedback). Thread timestamp: {thread_ts}, message timestamp: {ts}, user: {user}, text: {full_user_query}"
             )
+            with open(f"{results_dir}/feedback.tsv", "a") as f:
+                f.write(f"{thread_ts}\t{ts}\t{user}\t{full_user_query}\n")
         else:
-            # Handle direct messages
+            # handle direct messages
             if event.get("channel_type") == "im":
                 if user_query:
-                    # Log the direct message
+                    # log the direct message
                     logging.info(
-                        f"Direct message received. User: {user}, Channel: {channel_id}, Event type: {event_type}, Thread timestamp {thread_ts}\n{user_query}"
+                        f"Direct message received. User: {user}, Channel: {channel_id}, Event type: {event_type}, Thread timestamp {thread_ts}\n{full_user_query}\n"
                     )
 
-                    response = query_engine.custom_query(user_query)
+                    response, nodes = query_engine.custom_query(user_query)
 
-                    # Send the response to Slack in the same thread
+                    # send the response to Slack in the same thread
                     reply = say(
                         response,
                         channel=channel_id,
@@ -181,7 +208,9 @@ def handle_query_event(event, say, client):
                         unfurl_links=False,
                     )
 
-                    # Pre-populate reply with two emoji reactions
+                    answer_ts = reply["ts"]
+
+                    # pre-populate reply with two emoji reactions
                     client.reactions_add(
                         channel=channel_id,
                         timestamp=reply["ts"],
@@ -192,19 +221,36 @@ def handle_query_event(event, say, client):
                         timestamp=reply["ts"],
                         name="thumbsdown",
                     )
-                    logging.info(f"Response ({reply['ts']})\n{response}\n")
+                    logging.info(f"Response ({answer_ts})\n{response}\n")
 
-            # Handle mentions in channels
+                    # write out to CSV tables
+                    with open(f"{results_dir}/qa_pairs.tsv", "a") as f:
+                        f.write(
+                            f"{thread_ts}\t{channel_id}\t{event_type}\t{user}\t{full_user_query}\t{response}\t{answer_ts}\n"
+                        )
+
+                    retrieval_data = (
+                        f"{thread_ts}\t"
+                        + "\t".join(
+                            [
+                                f"{nodes[0].metadata['doc_id']}\t{nodes[0].score}"
+                                for node in nodes
+                            ]
+                        )
+                        + "\n"
+                    )
+                    with open(f"{results_dir}/retrievals.tsv", "a") as f:
+                        f.write(retrieval_data)
+
+            # handle mentions in channels -- same as DMs
             elif event_type == "app_mention":
                 if user_query:
-                    # Log the mention
                     logging.info(
-                        f"Mention received. User: {user}, Channel: {channel_id}, Event type: {event_type}, Thread timestamp {thread_ts}\n{user_query}"
+                        f"Mention received. User: {user}, Channel: {channel_id}, Event type: {event_type}, Thread timestamp {thread_ts}\n{full_user_query}"
                     )
 
-                    response = query_engine.custom_query(user_query)
+                    response, nodes = query_engine.custom_query(user_query)
 
-                    # Send the response to Slack in the same thread
                     reply = say(
                         response,
                         channel=channel_id,
@@ -212,7 +258,8 @@ def handle_query_event(event, say, client):
                         unfurl_links=False,
                     )
 
-                    # Pre-populate reply with two emoji reactions
+                    answer_ts = reply["ts"]
+
                     client.reactions_add(
                         channel=channel_id,
                         timestamp=reply["ts"],
@@ -223,7 +270,26 @@ def handle_query_event(event, say, client):
                         timestamp=reply["ts"],
                         name="thumbsdown",
                     )
-                    logging.info(f"Response ({reply['ts']})\n{response}\n")
+                    logging.info(f"Response ({answer_ts})\n{response}\n")
+
+                    # write out to CSV tables
+                    with open(f"{results_dir}/qa_pairs.tsv", "a") as f:
+                        f.write(
+                            f"{thread_ts}\t{channel_id}\t{event_type}\t{user}\t{full_user_query}\t{response}\t{answer_ts}\n"
+                        )
+
+                    retrieval_data = (
+                        f"{thread_ts}\t"
+                        + "\t".join(
+                            [
+                                f"{nodes[0].metadata['doc_id']}\t{nodes[0].score}"
+                                for node in nodes
+                            ]
+                        )
+                        + "\n"
+                    )
+                    with open(f"{results_dir}/retrievals.tsv", "a") as f:
+                        f.write(retrieval_data)
 
     except Exception as e:
         logging.error(f"Error: {e}")
@@ -236,13 +302,15 @@ def handle_reaction_added(event, say):
         logging.debug(f"Received event: {event['type']}")
 
         event_type = event["type"]
-        message_ts = event["item"]["ts"]
+        answer_ts = event["item"]["ts"]
         reaction = event["reaction"]
         user = event["user"]
 
         logging.info(
-            f"{event_type}: {reaction}, Message timestamp: {message_ts}, User: {user}"
+            f"{event_type}: {reaction}, Message timestamp: {answer_ts}, User: {user}"
         )
+        with open(f"{results_dir}/reactions.tsv", "a") as f:
+            f.write(f"{answer_ts}\t{event_type}\t{user}\t{reaction}\n")
     except Exception as e:
         logging.error(f"Error: {e}")
 
@@ -379,7 +447,7 @@ class ArxivRetrievalQueryEngine(CustomQueryEngine):
             qa_prompt.format(context_str=context_str, query_str=query_str)
         )
 
-        return str(response)
+        return str(response), nodes
 
 
 def build_query_engine(
@@ -420,6 +488,7 @@ if __name__ == "__main__":
     setup_logging(args.verbosity, log_filename)
 
     initialize_models(local_llm=args.local_llm)
+    initialize_tables()
 
     logging.info(f"Working in {ROOT} directory")
     db = chromadb.PersistentClient(path=f"{ROOT}/chroma_db")
