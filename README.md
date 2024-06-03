@@ -109,7 +109,10 @@ If you use this software, then please consider citing the accompanying paper:
 ```
 @misc{astroarxivbot-llm,
       title={Designing an Evaluation Framework for Large Language Models in Astronomy Research}, 
-      author={John F. Wu and Alina Hyk and Kiera McCormick and Christine Ye and Simone Astarita and Elina Baral and Jo Ciuca and Jesse Cranney and Anjalie Field and Kartheik Iyer and Philipp Koehn and Jenn Kotler and Sandor Kruk and Michelle Ntampaka and Charles O'Neill and Joshua E.G. Peek and Sanjib Sharma and Mikaeel Yunus},
-      year={2024}
+      author={John F. Wu and Alina Hyk and Kiera McCormick and Christine Ye and Simone Astarita and Elina Baral and Jo Ciuca and Jesse Cranney and Anjalie Field and Kartheik Iyer and Philipp Koehn and Jenn Kotler and Sandor Kruk and Michelle Ntampaka and Charles O'Neill and Joshua E. G. Peek and Sanjib Sharma and Mikaeel Yunus},
+      year={2024},
+      eprint={2405.20389},
+      archivePrefix={arXiv},
+      primaryClass={astro-ph.IM}
 }
 ```
