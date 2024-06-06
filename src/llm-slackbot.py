@@ -233,7 +233,7 @@ def handle_query_event(event, say, client):
                         f"{thread_ts}\t"
                         + "\t".join(
                             [
-                                f"{nodes[0].metadata['doc_id']}\t{nodes[0].score}"
+                                f"{node.metadata['doc_id']}\t{node.score}"
                                 for node in nodes
                             ]
                         )
